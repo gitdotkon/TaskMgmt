@@ -225,6 +225,12 @@ body {
     min-height: 400px;
     max-height: 600px;
     overflow-y: auto;
+    transition: background-color 0.2s ease;
+}
+
+.kanban-tasks.drag-over {
+    background-color: rgba(0, 113, 227, 0.05);
+    border-radius: 16px;
 }
 
 /* Task Card */
@@ -233,15 +239,26 @@ body {
     border-radius: 16px;
     padding: 20px;
     margin-bottom: 12px;
-    cursor: pointer;
+    cursor: grab;
     transition: var(--transition);
     border: 1px solid transparent;
+    user-select: none;
 }
 
 .task-card:hover {
     background: var(--bg-primary);
     box-shadow: var(--shadow-md);
     border-color: var(--border-color);
+}
+
+.task-card:active {
+    cursor: grabbing;
+}
+
+.task-card.dragging {
+    opacity: 0.5;
+    transform: scale(0.98);
+    box-shadow: var(--shadow-lg);
 }
 
 .task-card:last-child {

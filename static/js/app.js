@@ -1,10 +1,12 @@
 // Global variables
 let allTasks = [];
+let draggedTask = null;
 
 // Load tasks on page load
 document.addEventListener('DOMContentLoaded', () => {
     loadTasks();
     setupEventListeners();
+    setupDragAndDrop();
 });
 
 // Setup event listeners
@@ -22,6 +24,53 @@ function setupEventListeners() {
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     document.getElementById('taskStartDate').value = now.toISOString().slice(0, 16);
+}
+
+// Setup drag and drop
+function setupDragAndDrop() {
+    const columns = document.querySelectorAll('.kanban-tasks');
+    
+    columns.forEach(column => {
+        column.addEventListener('dragover', handleDragOver);
+        column.addEventListener('drop', handleDrop);
+        column.addEventListener('dragenter', handleDragEnter);
+        column.addEventListener('dragleave', handleDragLeave);
+    });
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function handleDragEnter(e) {
+    e.preventDefault();
+    e.currentTarget.classList.add('drag-over');
+}
+
+function handleDragLeave(e) {
+    e.currentTarget.classList.remove('drag-over');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    e.currentTarget.classList.remove('drag-over');
+    
+    if (!draggedTask) return;
+    
+    const newStatus = e.currentTarget.id.replace('tasks-', '');
+    const statusMap = {
+        'todo': 'To Do',
+        'inprogress': 'In Progress',
+        'done': 'Done'
+    };
+    
+    const newStatusKey = statusMap[newStatus];
+    if (newStatusKey && draggedTask.status !== newStatusKey) {
+        updateTaskStatus(draggedTask.id, newStatusKey);
+    }
+    
+    draggedTask = null;
 }
 
 // Open modal
@@ -170,7 +219,12 @@ function createTaskCard(task) {
     const completedDate = task.completed_date ? formatDate(task.completed_date) : '-';
     
     return `
-        <div class="task-card" onclick="editTask(${task.id})">
+        <div class="task-card" 
+             draggable="true" 
+             data-task-id="${task.id}"
+             ondragstart="handleDragStart(event, ${task.id})"
+             ondragend="handleDragEnd(event)"
+             onclick="event.stopPropagation(); editTask(${task.id})">
             <div class="task-card-header">
                 <h6 class="task-title">${escapeHtml(task.title)}</h6>
                 <span class="task-status-badge ${statusClass}">${statusLabel}</span>
@@ -190,6 +244,19 @@ function createTaskCard(task) {
             </div>
         </div>
     `;
+}
+
+// Drag and drop handlers
+function handleDragStart(e, taskId) {
+    draggedTask = allTasks.find(t => t.id === taskId);
+    e.target.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', taskId);
+}
+
+function handleDragEnd(e) {
+    e.target.classList.remove('dragging');
+    draggedTask = null;
 }
 
 // Edit task
