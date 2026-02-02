@@ -5,7 +5,7 @@ from datetime import datetime
 
 app = Flask(__name__)
 
-DATA_FILE = "tasks.json"
+DATA_FILE = "/Users/kon/clawd/skills/TaskMgmt/tasks.json"
 
 
 def load_tasks():
