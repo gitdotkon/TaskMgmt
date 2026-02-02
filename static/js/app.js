@@ -10,7 +10,43 @@ document.addEventListener('DOMContentLoaded', () => {
 // Setup event listeners
 function setupEventListeners() {
     document.getElementById('saveTaskBtn').addEventListener('click', handleTaskSubmit);
+    document.getElementById('cancelBtn').addEventListener('click', closeModal);
+    document.getElementById('modalClose').addEventListener('click', closeModal);
+    document.getElementById('addTaskBtn').addEventListener('click', openModal);
+    document.getElementById('modalOverlay').addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) closeModal();
+    });
     document.getElementById('filterAssignee').addEventListener('input', filterTasks);
+    
+    // Set default date to now
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    document.getElementById('taskStartDate').value = now.toISOString().slice(0, 16);
+}
+
+// Open modal
+function openModal() {
+    document.getElementById('modalOverlay').classList.add('active');
+    document.getElementById('taskTitle').focus();
+}
+
+// Close modal
+function closeModal() {
+    document.getElementById('modalOverlay').classList.remove('active');
+    resetForm();
+}
+
+// Reset form
+function resetForm() {
+    document.getElementById('taskTitle').value = '';
+    document.getElementById('taskDescription').value = '';
+    document.getElementById('taskStatus').value = 'To Do';
+    document.getElementById('taskAssignedTo').value = '';
+    
+    const now = new Date();
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    document.getElementById('taskStartDate').value = now.toISOString().slice(0, 16);
+    document.getElementById('taskCompletedDate').value = '';
 }
 
 // Handle task form submission
@@ -19,11 +55,13 @@ async function handleTaskSubmit() {
         title: document.getElementById('taskTitle').value,
         description: document.getElementById('taskDescription').value,
         status: document.getElementById('taskStatus').value,
-        assigned_to: document.getElementById('taskAssignedTo').value
+        assigned_to: document.getElementById('taskAssignedTo').value,
+        start_date: document.getElementById('taskStartDate').value || new Date().toISOString(),
+        completed_date: document.getElementById('taskCompletedDate').value || null
     };
     
     if (!taskData.title) {
-        alert('Please enter a task title');
+        alert('请输入任务标题');
         return;
     }
     
@@ -37,22 +75,12 @@ async function handleTaskSubmit() {
         });
         
         if (response.ok) {
-            // Reset form
-            document.getElementById('taskTitle').value = '';
-            document.getElementById('taskDescription').value = '';
-            document.getElementById('taskStatus').value = 'To Do';
-            document.getElementById('taskAssignedTo').value = '';
-            
-            // Close modal
-            const modal = bootstrap.Modal.getInstance(document.getElementById('taskModal'));
-            modal.hide();
-            
-            // Reload tasks
+            closeModal();
             loadTasks();
         }
     } catch (error) {
         console.error('Error creating task:', error);
-        alert('Failed to create task');
+        alert('创建任务失败');
     }
 }
 
@@ -73,7 +101,7 @@ function filterTasks() {
     
     const filteredTasks = allTasks.filter(task => {
         const matchesAssignee = !assigneeFilter || 
-            task.assigned_to.toLowerCase().includes(assigneeFilter);
+            (task.assigned_to && task.assigned_to.toLowerCase().includes(assigneeFilter));
         return matchesAssignee;
     });
     
@@ -82,80 +110,156 @@ function filterTasks() {
 
 // Display tasks organized by status
 function displayTasksByStatus(tasks) {
-    const statuses = ['To Do', 'In Progress', 'Done', 'Blocked'];
-    const statusIds = ['todo', 'inprogress', 'done', 'blocked'];
+    const statuses = [
+        { key: 'To Do', id: 'todo', label: '待办' },
+        { key: 'In Progress', id: 'inprogress', label: '进行中' },
+        { key: 'Done', id: 'done', label: '已完成' }
+    ];
     
-    statuses.forEach((status, index) => {
-        const statusTasks = tasks.filter(task => task.status === status);
-        const container = document.getElementById(`tasks-${statusIds[index]}`);
-        const countElement = document.getElementById(`count-${statusIds[index]}`);
+    let totalCount = 0;
+    
+    statuses.forEach(status => {
+        const statusTasks = tasks.filter(task => task.status === status.key);
+        const container = document.getElementById(`tasks-${status.id}`);
+        const countElement = document.getElementById(`count-${status.id}`);
+        
+        totalCount += statusTasks.length;
         
         // Update count
         countElement.textContent = statusTasks.length;
         
         // Display tasks
         if (statusTasks.length === 0) {
-            container.innerHTML = '<div class="empty-column">No tasks</div>';
+            container.innerHTML = `
+                <div class="empty-column">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
+                    </svg>
+                    <p>暂无任务</p>
+                </div>
+            `;
         } else {
-            container.innerHTML = statusTasks.map(task => createTaskCard(task, status)).join('');
+            container.innerHTML = statusTasks.map(task => createTaskCard(task)).join('');
         }
     });
+    
+    // Update total count
+    document.getElementById('totalTasks').textContent = `${totalCount} 个任务`;
+    
+    // Update stats
+    document.getElementById('stat-todo').textContent = tasks.filter(t => t.status === 'To Do').length;
+    document.getElementById('stat-inprogress').textContent = tasks.filter(t => t.status === 'In Progress').length;
+    document.getElementById('stat-done').textContent = tasks.filter(t => t.status === 'Done').length;
 }
 
 // Create task card HTML
-function createTaskCard(task, currentStatus) {
-    const date = new Date(task.created_date).toLocaleDateString();
-    const statusOptions = ['To Do', 'In Progress', 'Done', 'Blocked']
-        .filter(s => s !== currentStatus);
+function createTaskCard(task) {
+    const statusClass = {
+        'To Do': 'status-ToDo',
+        'In Progress': 'status-InProgress',
+        'Done': 'status-Done'
+    }[task.status] || 'status-ToDo';
+    
+    const statusLabel = {
+        'To Do': '待办',
+        'In Progress': '进行中',
+        'Done': '已完成'
+    }[task.status] || task.status;
+    
+    const startDate = task.start_date ? formatDate(task.start_date) : '-';
+    const completedDate = task.completed_date ? formatDate(task.completed_date) : '-';
     
     return `
-        <div class="task-card">
+        <div class="task-card" onclick="editTask(${task.id})">
             <div class="task-card-header">
                 <h6 class="task-title">${escapeHtml(task.title)}</h6>
-                <button class="task-delete" onclick="deleteTask(${task.id})" title="Delete task">
-                    🗑️
-                </button>
+                <span class="task-status-badge ${statusClass}">${statusLabel}</span>
             </div>
             ${task.description ? `<div class="task-description">${escapeHtml(task.description)}</div>` : ''}
             <div class="task-meta">
                 <div class="task-assignee">
-                    <span>👤</span>
-                    <span>${task.assigned_to || 'Unassigned'}</span>
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+                    </svg>
+                    <span>${task.assigned_to || '未分配'}</span>
                 </div>
-                <div class="task-date">${date}</div>
-            </div>
-            <div class="task-actions">
-                ${statusOptions.map(status => {
-                    const btnClass = getStatusButtonClass(status);
-                    return `<button class="btn btn-sm ${btnClass}" onclick="updateTaskStatus(${task.id}, '${status}')">
-                        ${getStatusIcon(status)} ${status}
-                    </button>`;
-                }).join('')}
+                <div class="task-dates">
+                    ${task.start_date ? `<span class="task-date">开始: ${startDate}</span>` : ''}
+                    ${task.completed_date ? `<span class="task-date">完成: ${completedDate}</span>` : ''}
+                </div>
             </div>
         </div>
     `;
 }
 
-// Get status button class
-function getStatusButtonClass(status) {
-    const classMap = {
-        'To Do': 'btn-secondary',
-        'In Progress': 'btn-info',
-        'Done': 'btn-success',
-        'Blocked': 'btn-danger'
-    };
-    return classMap[status] || 'btn-secondary';
+// Edit task
+async function editTask(taskId) {
+    const task = allTasks.find(t => t.id === taskId);
+    if (!task) return;
+    
+    document.getElementById('taskTitle').value = task.title || '';
+    document.getElementById('taskDescription').value = task.description || '';
+    document.getElementById('taskStatus').value = task.status || 'To Do';
+    document.getElementById('taskAssignedTo').value = task.assigned_to || '';
+    
+    if (task.start_date) {
+        const startDate = new Date(task.start_date);
+        startDate.setMinutes(startDate.getMinutes() - startDate.getTimezoneOffset());
+        document.getElementById('taskStartDate').value = startDate.toISOString().slice(0, 16);
+    }
+    
+    if (task.completed_date) {
+        const completedDate = new Date(task.completed_date);
+        completedDate.setMinutes(completedDate.getMinutes() - completedDate.getTimezoneOffset());
+        document.getElementById('taskCompletedDate').value = completedDate.toISOString().slice(0, 16);
+    }
+    
+    // Change save button to update
+    const saveBtn = document.getElementById('saveTaskBtn');
+    saveBtn.textContent = '更新';
+    saveBtn.onclick = () => updateTask(taskId);
+    
+    openModal();
 }
 
-// Get status icon
-function getStatusIcon(status) {
-    const iconMap = {
-        'To Do': '📋',
-        'In Progress': '🚀',
-        'Done': '✅',
-        'Blocked': '🚫'
+// Update task
+async function updateTask(taskId) {
+    const taskData = {
+        title: document.getElementById('taskTitle').value,
+        description: document.getElementById('taskDescription').value,
+        status: document.getElementById('taskStatus').value,
+        assigned_to: document.getElementById('taskAssignedTo').value,
+        start_date: document.getElementById('taskStartDate').value,
+        completed_date: document.getElementById('taskCompletedDate').value
     };
-    return iconMap[status] || '📋';
+    
+    if (!taskData.title) {
+        alert('请输入任务标题');
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/tasks/${taskId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(taskData)
+        });
+        
+        if (response.ok) {
+            // Reset save button
+            const saveBtn = document.getElementById('saveTaskBtn');
+            saveBtn.textContent = '保存';
+            saveBtn.onclick = handleTaskSubmit;
+            
+            closeModal();
+            loadTasks();
+        }
+    } catch (error) {
+        console.error('Error updating task:', error);
+        alert('更新任务失败');
+    }
 }
 
 // Update task status
@@ -164,15 +268,12 @@ async function updateTaskStatus(taskId, newStatus) {
     if (!task) return;
     
     try {
-        const response = await fetch(`/api/tasks/${taskId}`, {
+        const response = await fetch(`/api/tasks/${taskId}/status`, {
             method: 'PUT',
             headers: {
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                ...task,
-                status: newStatus
-            })
+            body: JSON.stringify({ status: newStatus })
         });
         
         if (response.ok) {
@@ -180,13 +281,13 @@ async function updateTaskStatus(taskId, newStatus) {
         }
     } catch (error) {
         console.error('Error updating task:', error);
-        alert('Failed to update task');
+        alert('更新状态失败');
     }
 }
 
 // Delete task
 async function deleteTask(taskId) {
-    if (!confirm('Are you sure you want to delete this task?')) return;
+    if (!confirm('确定要删除此任务吗？')) return;
     
     try {
         const response = await fetch(`/api/tasks/${taskId}`, {
@@ -198,12 +299,20 @@ async function deleteTask(taskId) {
         }
     } catch (error) {
         console.error('Error deleting task:', error);
-        alert('Failed to delete task');
+        alert('删除任务失败');
     }
+}
+
+// Format date
+function formatDate(dateString) {
+    if (!dateString) return '-';
+    const date = new Date(dateString);
+    return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
 // Escape HTML to prevent XSS
 function escapeHtml(text) {
+    if (!text) return '';
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
