@@ -24,6 +24,33 @@ function setupEventListeners() {
     const now = new Date();
     now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
     document.getElementById('taskStartDate').value = now.toISOString().slice(0, 16);
+    
+    // Load assignees for dropdown
+    loadAssignees();
+}
+
+// Load assignees for dropdown
+async function loadAssignees() {
+    try {
+        const response = await fetch('/api/assignees');
+        const assignees = await response.json();
+        const select = document.getElementById('taskAssignedTo');
+        
+        // Keep the first option
+        const firstOption = select.options[0];
+        select.innerHTML = '';
+        select.appendChild(firstOption);
+        
+        // Add assignees from API
+        assignees.forEach(assignee => {
+            const option = document.createElement('option');
+            option.value = assignee;
+            option.textContent = assignee;
+            select.appendChild(option);
+        });
+    } catch (error) {
+        console.error('Error loading assignees:', error);
+    }
 }
 
 // Setup drag and drop
@@ -274,7 +301,10 @@ async function editTask(taskId) {
     document.getElementById('taskTitle').value = task.title || '';
     document.getElementById('taskDescription').value = task.description || '';
     document.getElementById('taskStatus').value = task.status || 'To Do';
-    document.getElementById('taskAssignedTo').value = task.assigned_to || '';
+    
+    // Set selected assignee
+    const assigneeSelect = document.getElementById('taskAssignedTo');
+    assigneeSelect.value = task.assigned_to || '';
     
     if (task.start_date) {
         const startDate = new Date(task.start_date);

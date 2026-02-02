@@ -149,5 +149,16 @@ def delete_task(task_id):
     return jsonify({"message": "Task deleted"}), 200
 
 
+@app.route("/api/assignees", methods=["GET"])
+def get_assignees():
+    """Get all unique assignees"""
+    tasks = load_tasks()
+    assignees = set()
+    for task in tasks:
+        if task.get("assigned_to"):
+            assignees.add(task["assigned_to"])
+    return jsonify(sorted(list(assignees)))
+
+
 if __name__ == "__main__":
     app.run(debug=True, port=5000)
