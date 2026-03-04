@@ -1,0 +1,162 @@
+name: Deploy to Alibaba Cloud ECS
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:  # 允许手动触发
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+        cache: 'pip'
+
+    - name: Validate application
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        python -c "import flask; print(f'✅ Flask version: {flask.__version__}')"
+        python -m py_compile app.py && echo "✅ Python syntax check passed"
+        echo "Application validation completed"
+
+    - name: Setup SSH connection
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
+      run: |
+        mkdir -p ~/.ssh
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/ecs_key
+        chmod 600 ~/.ssh/ecs_key
+
+        # 配置SSH known_hosts
+        ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
+
+        # 测试SSH连接
+        echo "Testing SSH connection to $SSH_HOST..."
+        ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+          "${{ secrets.ALICLOUD_ECS_USER }}@$SSH_HOST" "echo '✅ SSH connection successful'"
+
+    - name: Transfer files to ECS
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
+        SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+      run: |
+        DEPLOY_DIR="/tmp/deploy_$GITHUB_SHA"
+
+        echo "Transferring files to ECS..."
+        scp -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no -r \
+          ./* \
+          "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/"
+
+        echo "Transferring deployment script..."
+        scp -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+          ./scripts/deploy.sh \
+          "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/"
+
+        echo "Files transferred to $DEPLOY_DIR"
+
+    - name: Execute deployment on ECS
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
+        SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+        DEPLOY_PATH: ${{ secrets.ALICLOUD_DEPLOY_PATH || '/opt/taskmgmt' }}
+        APP_PORT: ${{ secrets.ALICLOUD_APP_PORT || '5000' }}
+      run: |
+        DEPLOY_DIR="/tmp/deploy_$GITHUB_SHA"
+
+        echo "Executing deployment script on ECS..."
+        ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+          "$SSH_USER@$SSH_HOST" \
+          "cd $DEPLOY_DIR && \
+           chmod +x deploy.sh && \
+           sudo bash deploy.sh '$DEPLOY_PATH' '$APP_PORT' '$SSH_USER'"
+
+        echo "Deployment script executed successfully"
+
+    - name: Cleanup temporary files
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
+        SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+      run: |
+        DEPLOY_DIR="/tmp/deploy_$GITHUB_SHA"
+
+        echo "Cleaning up temporary files on ECS..."
+        ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+          "$SSH_USER@$SSH_HOST" \
+          "rm -rf $DEPLOY_DIR"
+
+        echo "Cleanup completed"
+
+    - name: Verify deployment
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
+        SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+        APP_PORT: ${{ secrets.ALICLOUD_APP_PORT || '5000' }}
+      run: |
+        echo "Verifying deployment..."
+
+        # 检查服务状态
+        SERVICE_STATUS=$(ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+          "$SSH_USER@$SSH_HOST" \
+          "sudo systemctl is-active taskmgmt 2>/dev/null || echo 'inactive'")
+
+        if [ "$SERVICE_STATUS" = "active" ]; then
+          echo "✅ Service is active"
+
+          # 检查端口监听
+          PORT_LISTENING=$(ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "sudo ss -tlnp | grep ':$APP_PORT' | wc -l")
+
+          if [ "$PORT_LISTENING" -gt 0 ]; then
+            echo "✅ Application is listening on port $APP_PORT"
+          else
+            echo "⚠️  Application is not listening on port $APP_PORT"
+          fi
+
+          # 显示服务状态摘要
+          ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "echo '--- Service Status ---' && \
+             sudo systemctl status taskmgmt --no-pager | head -10"
+        else
+          echo "❌ Service is not active: $SERVICE_STATUS"
+          ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+            "$SSH_USER@$SSH_HOST" \
+            "echo '--- Service Logs ---' && \
+             sudo journalctl -u taskmgmt -n 20 --no-pager"
+          exit 1
+        fi
+
+    - name: Deployment summary
+      run: |
+        echo "========================================"
+        echo "✅ Deployment completed successfully!"
+        echo ""
+        echo "Application details:"
+        echo "  - Host: ${{ secrets.ALICLOUD_ECS_HOST }}"
+        echo "  - Port: ${{ secrets.ALICLOUD_APP_PORT || '5000' }}"
+        echo "  - Path: ${{ secrets.ALICLOUD_DEPLOY_PATH || '/opt/taskmgmt' }}"
+        echo ""
+        echo "Access the application at:"
+        echo "  http://${{ secrets.ALICLOUD_ECS_HOST }}:${{ secrets.ALICLOUD_APP_PORT || '5000' }}"
+        echo ""
+        echo "Management commands on ECS:"
+        echo "  sudo systemctl status taskmgmt"
+        echo "  sudo journalctl -u taskmgmt -f"
+        echo "  sudo systemctl restart taskmgmt"
+        echo "========================================"

@@ -75,3 +75,44 @@ http://localhost:5000
 - **Frontend**: HTML, CSS, JavaScript
 - **UI Framework**: Bootstrap 5
 - **Data Storage**: JSON file
+
+## Deployment
+
+This project includes GitHub Actions for automated deployment to Alibaba Cloud ECS.
+
+### Automated Deployment with GitHub Actions
+
+1. Configure GitHub Secrets with your Alibaba Cloud ECS credentials:
+   - `ALICLOUD_SSH_PRIVATE_KEY`: SSH private key for ECS access
+   - `ALICLOUD_ECS_HOST`: ECS public IP or hostname
+   - `ALICLOUD_ECS_USER`: SSH username (e.g., root, ubuntu)
+   - `ALICLOUD_DEPLOY_PATH`: Deployment directory (e.g., /opt/taskmgmt)
+   - `ALICLOUD_APP_PORT`: Application port (default: 5000)
+
+2. Push to `main` branch triggers automatic deployment:
+   ```bash
+   git push origin main
+   ```
+
+3. The workflow will:
+   - Install dependencies
+   - Transfer files to ECS via SSH
+   - Set up Python virtual environment
+   - Configure systemd service
+   - Start the application with Gunicorn
+
+### Manual Deployment
+
+For detailed deployment instructions, see [DEPLOYMENT.md](DEPLOYMENT.md).
+
+### Local Development
+
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run development server
+python app.py
+```
+
+Access at: http://localhost:5000
