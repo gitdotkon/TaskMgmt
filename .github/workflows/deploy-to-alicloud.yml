@@ -39,9 +39,8 @@ jobs:
         chmod 600 ~/.ssh/ecs_key
 
         # 配置SSH known_hosts
-        ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/nullgi
+        ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
 
-        chmod 600 /dev/nullgi
         # 测试SSH连接
         echo "Testing SSH connection to $SSH_HOST..."
         ssh -i ~/.ssh/ecs_key -vvv -o StrictHostKeyChecking=no \
