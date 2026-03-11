@@ -29,48 +29,81 @@ jobs:
         python -m py_compile app.py && echo "✅ Python syntax check passed"
         echo "Application validation completed"
 
+    - name: Verify secrets configuration
+      run: |
+        echo "Checking required secrets..."
+        if [ -z "${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}" ]; then
+          echo "❌ Error: ALICLOUD_SSH_PRIVATE_KEY secret is not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.ALICLOUD_ECS_HOST }}" ]; then
+          echo "❌ Error: ALICLOUD_ECS_HOST secret is not set"
+          exit 1
+        fi
+        if [ -z "${{ secrets.ALICLOUD_ECS_USER }}" ]; then
+          echo "❌ Error: ALICLOUD_ECS_USER secret is not set"
+          exit 1
+        fi
+        echo "✅ All required secrets are configured"
+
     - name: Setup SSH connection
       env:
         SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
         SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
+        SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
       run: |
+        # 创建SSH目录
         mkdir -p ~/.ssh
+        chmod 700 ~/.ssh
+        
+        # 写入私钥
         echo "$SSH_PRIVATE_KEY" > ~/.ssh/ecs_key
         chmod 600 ~/.ssh/ecs_key
+        
+        # 验证私钥格式
+        if ! ssh-keygen -l -f ~/.ssh/ecs_key &>/dev/null; then
+          echo "❌ Error: Invalid SSH private key format"
+          exit 1
+        fi
+        echo "✅ SSH private key is valid"
 
         # 配置SSH known_hosts
-        ssh-keyscan -H $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null
-
+        echo "Adding $SSH_HOST to known_hosts..."
+        ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+        
         # 测试SSH连接
-        echo "Testing SSH connection to $SSH_HOST..."
-        ssh -i ~/.ssh/ecs_key -vvv -o StrictHostKeyChecking=no \
-          "${{ secrets.ALICLOUD_ECS_USER }}@$SSH_HOST" "echo '✅ SSH connection successful'"
+        echo "Testing SSH connection to $SSH_USER@$SSH_HOST..."
+        if ssh -i ~/.ssh/ecs_key -vvv -o StrictHostKeyChecking=no -o ConnectTimeout=10 \
+          "$SSH_USER@$SSH_HOST" "echo '✅ SSH connection successful'"; then
+          echo "✅ SSH connection test passed"
+        else
+          echo "❌ SSH connection test failed"
+          exit 1
+        fi
 
     - name: Transfer files to ECS
       env:
-        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
-        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
         SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
       run: |
         DEPLOY_DIR="/tmp/deploy_$GITHUB_SHA"
 
-        echo "Transferring files to ECS..."
-        scp -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no -r \
-          ./* \
-          "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/"
+        echo "Creating deployment directory on ECS..."
+        ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
+          "$SSH_USER@$SSH_HOST" "mkdir -p $DEPLOY_DIR"
 
-        echo "Transferring deployment script..."
-        scp -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
-          ./scripts/deploy.sh \
-          "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/"
+        echo "Transferring application files to ECS..."
+        rsync -avz --exclude='.git' --exclude='venv' --exclude='__pycache__' \
+          --exclude='*.pyc' --exclude='tasks.json' \
+          -e "ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no" \
+          ./ "$SSH_USER@$SSH_HOST:$DEPLOY_DIR/"
 
-        echo "Files transferred to $DEPLOY_DIR"
+        echo "✅ Files transferred to $DEPLOY_DIR"
 
     - name: Execute deployment on ECS
       env:
-        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
-        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
         SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
         DEPLOY_PATH: ${{ secrets.ALICLOUD_DEPLOY_PATH || '/opt/taskmgmt' }}
         APP_PORT: ${{ secrets.ALICLOUD_APP_PORT || '5001' }}
       run: |
@@ -80,31 +113,30 @@ jobs:
         ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
           "$SSH_USER@$SSH_HOST" \
           "cd $DEPLOY_DIR && \
-           chmod +x deploy.sh && \
-           sudo bash deploy.sh '$DEPLOY_PATH' '$APP_PORT' '$SSH_USER'"
+           chmod +x scripts/deploy.sh && \
+           sudo bash scripts/deploy.sh '$DEPLOY_PATH' '$APP_PORT' '$SSH_USER'"
 
-        echo "Deployment script executed successfully"
+        echo "✅ Deployment script executed successfully"
 
     - name: Cleanup temporary files
+      if: always()
       env:
-        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
-        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
         SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
       run: |
         DEPLOY_DIR="/tmp/deploy_$GITHUB_SHA"
 
         echo "Cleaning up temporary files on ECS..."
         ssh -i ~/.ssh/ecs_key -o StrictHostKeyChecking=no \
           "$SSH_USER@$SSH_HOST" \
-          "rm -rf $DEPLOY_DIR"
+          "rm -rf $DEPLOY_DIR" || echo "⚠️  Cleanup failed (non-critical)"
 
-        echo "Cleanup completed"
+        echo "✅ Cleanup completed"
 
     - name: Verify deployment
       env:
-        SSH_PRIVATE_KEY: ${{ secrets.ALICLOUD_SSH_PRIVATE_KEY }}
-        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
         SSH_USER: ${{ secrets.ALICLOUD_ECS_USER }}
+        SSH_HOST: ${{ secrets.ALICLOUD_ECS_HOST }}
         APP_PORT: ${{ secrets.ALICLOUD_APP_PORT || '5001' }}
       run: |
         echo "Verifying deployment..."
